@@ -60,15 +60,24 @@ check_user_login(Username, [{password, <<>>}]) ->
 
 check_user_login(User, [{password, PW}]) ->
     ?L("CHECK: login for ~s", [User]),
-    R = case dn_lookup_when() of
+    	R = case dn_lookup_when() of
             prebind -> UserDN = username_to_dn_prebind(User),
                        with_ldap({ok, {UserDN, PW}},
                                  fun(L) -> do_login(User, UserDN,  PW, L) end);
-            _       -> with_ldap({ok, {fill_user_dn_pattern(User), PW}},
+            _       -> with_ldap({ok, {fill_user_dn_pattern1(User), PW}},
                                  fun(L) -> do_login(User, unknown, PW, L) end)
+        end,    
+	U = case log_result(R) of
+	   denied  -> with_ldap({ok, {fill_user_dn_pattern2(User), PW}},
+                                 fun(L) -> do_login(User, unknown, PW, L) end);
+	   _ 	   -> R
+	end,
+	X = case log_result(U) of
+           denied  -> with_ldap({ok, {fill_user_dn_pattern3(User), PW}},
+                                 fun(L) -> do_login(User, unknown, PW, L) end);
+           _       -> U
         end,
-    ?L("DECISION: login for ~s: ~p", [User, log_result(R)]),
-    R;
+	X;
 
 check_user_login(Username, AuthProps) ->
     exit({unknown_auth_props, Username, AuthProps}).
@@ -365,10 +374,46 @@ username_to_dn_prebind(Username) ->
               fun (LDAP) -> dn_lookup(Username, LDAP) end).
 
 username_to_dn(Username, LDAP,  postbind) -> dn_lookup(Username, LDAP);
-username_to_dn(Username, _LDAP, _When)    -> fill_user_dn_pattern(Username).
+username_to_dn(Username, _LDAP, _When)    -> fill_user_dn_pattern1(Username).
 
 dn_lookup(Username, LDAP) ->
-    Filled = fill_user_dn_pattern(Username),
+    Filled = fill_user_dn_pattern1(Username),
+    case eldap:search(LDAP,
+                      [{base, env(dn_lookup_base)},
+                       {filter, eldap:equalityMatch(
+                                  env(dn_lookup_attribute), Filled)},
+                       {attributes, ["distinguishedName"]}]) of
+        {ok, #eldap_search_result{entries = [#eldap_entry{object_name = DN}]}}->
+            ?L1("DN lookup: ~s -> ~s", [Username, DN]),
+            DN;
+        {ok, #eldap_search_result{entries = Entries}} ->
+            rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
+                               [Filled, Entries]),
+            Filled;
+        {error, _} ->
+            dn_lookup2(Username, LDAP)
+    end.
+
+dn_lookup2(Username, LDAP) ->
+    Filled = fill_user_dn_pattern2(Username),
+    case eldap:search(LDAP,
+                      [{base, env(dn_lookup_base)},
+                       {filter, eldap:equalityMatch(
+                                  env(dn_lookup_attribute), Filled)},
+                       {attributes, ["distinguishedName"]}]) of
+        {ok, #eldap_search_result{entries = [#eldap_entry{object_name = DN}]}}->
+            ?L1("DN lookup: ~s -> ~s", [Username, DN]),
+            DN;
+        {ok, #eldap_search_result{entries = Entries}} ->
+            rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
+                               [Filled, Entries]),
+            Filled;
+        {error, _}  ->
+            dn_lookup3(Username, LDAP)
+    end.
+
+dn_lookup3(Username, LDAP) ->
+    Filled = fill_user_dn_pattern3(Username),
     case eldap:search(LDAP,
                       [{base, env(dn_lookup_base)},
                        {filter, eldap:equalityMatch(
@@ -385,8 +430,14 @@ dn_lookup(Username, LDAP) ->
             exit(E)
     end.
 
-fill_user_dn_pattern(Username) ->
-    fill(env(user_dn_pattern), [{username, Username}]).
+fill_user_dn_pattern1(Username) ->    
+	fill(env(user_dn_pattern1), [{username, Username}]).
+
+fill_user_dn_pattern2(Username) ->
+	 fill(env(user_dn_pattern2), [{username, Username}]).
+
+fill_user_dn_pattern3(Username) ->
+         fill(env(user_dn_pattern3), [{username, Username}]).
 
 creds(User) -> creds(User, env(other_bind)).
 
