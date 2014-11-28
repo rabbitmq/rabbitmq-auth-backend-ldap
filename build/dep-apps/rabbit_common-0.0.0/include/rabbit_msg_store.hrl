@@ -14,18 +14,12 @@
 %% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_util).
+-include("rabbit.hrl").
 
--export([fill/2]).
+-ifdef(use_specs).
 
-fill(Fmt, []) ->
-    binary_to_list(iolist_to_binary(Fmt));
+-type(msg() :: any()).
 
-fill(Fmt, [{K, V} | T]) ->
-    Var = [[$\\, $$, ${] ++ atom_to_list(K) ++ [$}]],
-    fill(re:replace(Fmt, Var, [to_repl(V)], [global]), T).
+-endif.
 
-to_repl(V) when is_atom(V) ->
-    atom_to_list(V);
-to_repl(V) ->
-    V.
+-record(msg_location, {msg_id, ref_count, file, offset, total_size}).

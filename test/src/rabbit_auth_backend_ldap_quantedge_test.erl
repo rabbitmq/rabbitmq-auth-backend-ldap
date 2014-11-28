@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_test).
+-module(rabbit_auth_backend_ldap_quantedge_test).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("amqp_client/include/amqp_client.hrl").

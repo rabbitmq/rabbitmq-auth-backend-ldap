@@ -1,6 +1,6 @@
 %% -*- erlang -*-
-{application, rabbitmq_auth_backend_ldap,
- [{description, "RabbitMQ LDAP Authentication Backend"},
+{application, rabbitmq_auth_backend_ldap_quantedge,
+ [{description, "RabbitMQ LDAP Authentication Backend, support up to 3 trees, customized for Quant Edge"},
   {vsn, "%%VSN%%"},
   {modules, []},
   {registered, []},

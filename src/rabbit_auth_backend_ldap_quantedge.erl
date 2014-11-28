@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap).
+-module(rabbit_auth_backend_ldap_quantedge).
 
 %% Connect to an LDAP server for authentication and authorisation
 
@@ -38,7 +38,7 @@
 
 description() ->
     [{name, <<"LDAP">>},
-     {description, <<"LDAP authentication / authorisation">>}].
+     {description, <<"LDAP Quant Edge authentication / authorisation">>}].
 
 %%--------------------------------------------------------------------
 
@@ -455,7 +455,7 @@ log(Fmt,  Args) -> case env(log) of
 
 fill(Fmt, Args) ->
     ?L2("filling template \"~s\" with~n            ~p", [Fmt, Args]),
-    R = rabbit_auth_backend_ldap_util:fill(Fmt, Args),
+    R = rabbit_auth_backend_ldap_quantedge_util:fill(Fmt, Args),
     ?L2("template result: \"~s\"", [R]),
     R.
 
