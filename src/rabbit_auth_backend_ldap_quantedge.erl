@@ -21,10 +21,11 @@
 -include_lib("eldap/include/eldap.hrl").
 -include_lib("rabbit_common/include/rabbit.hrl").
 
--behaviour(rabbit_auth_backend).
+-behaviour(rabbit_authn_backend).
+-behaviour(rabbit_authz_backend).
 
--export([description/0]).
--export([check_user_login/2, check_vhost_access/2, check_resource_access/3]).
+-export([user_login_authentication/2, user_login_authorization/1,
+         check_vhost_access/3, check_resource_access/3]).
 
 -define(L(F, A),  log("LDAP "         ++ F, A)).
 -define(L1(F, A), log("    LDAP "     ++ F, A)).
@@ -36,13 +37,7 @@
 
 %%--------------------------------------------------------------------
 
-description() ->
-    [{name, <<"LDAP">>},
-     {description, <<"LDAP Quant Edge authentication / authorisation">>}].
-
-%%--------------------------------------------------------------------
-
-check_user_login(Username, []) ->
+user_login_authentication(Username, []) ->
     %% Without password, e.g. EXTERNAL
     ?L("CHECK: passwordless login for ~s", [Username]),
     R = with_ldap(creds(none),
@@ -51,39 +46,46 @@ check_user_login(Username, []) ->
        [Username, log_result(R)]),
     R;
 
-check_user_login(Username, [{password, <<>>}]) ->
+user_login_authentication(Username, [{password, <<>>}]) ->
     %% Password "" is special in LDAP, see
     %% https://tools.ietf.org/html/rfc4513#section-5.1.2
     ?L("CHECK: unauthenticated login for ~s", [Username]),
     ?L("DECISION: unauthenticated login for ~s: denied", [Username]),
     {refused, "user '~s' - unauthenticated bind not allowed", [Username]};
 
-check_user_login(User, [{password, PW}]) ->
+user_login_authentication(User, [{password, PW}]) ->
     ?L("CHECK: login for ~s", [User]),
-    	R = case dn_lookup_when() of
+    R = case dn_lookup_when() of
             prebind -> UserDN = username_to_dn_prebind(User),
                        with_ldap({ok, {UserDN, PW}},
                                  fun(L) -> do_login(User, UserDN,  PW, L) end);
             _       -> with_ldap({ok, {fill_user_dn_pattern1(User), PW}},
                                  fun(L) -> do_login(User, unknown, PW, L) end)
-        end,    
-	U = case log_result(R) of
-	   denied  -> with_ldap({ok, {fill_user_dn_pattern2(User), PW}},
-                                 fun(L) -> do_login(User, unknown, PW, L) end);
-	   _ 	   -> R
-	end,
-	X = case log_result(U) of
-           denied  -> with_ldap({ok, {fill_user_dn_pattern3(User), PW}},
-                                 fun(L) -> do_login(User, unknown, PW, L) end);
-           _       -> U
         end,
-	X;
+    U = case log_result(R) of
+            denied  -> with_ldap({ok, {fill_user_dn_pattern2(User), PW}},
+                                 fun(L) -> do_login(User, unknown, PW, L) end);
+            _       -> R
+        end,
+    X = case log_result(U) of
+            denied  -> with_ldap({ok, {fill_user_dn_pattern3(User), PW}},
+                                 fun(L) -> do_login(User, unknown, PW, L) end);
+            _       -> R
+        end,
+    X;
 
-check_user_login(Username, AuthProps) ->
+user_login_authentication(Username, AuthProps) ->
     exit({unknown_auth_props, Username, AuthProps}).
 
-check_vhost_access(User = #user{username = Username,
-                                impl     = #impl{user_dn = UserDN}}, VHost) ->
+user_login_authorization(Username) ->
+    case user_login_authentication(Username, []) of
+        {ok, #auth_user{impl = Impl}} -> {ok, Impl};
+        Else                          -> Else
+    end.
+
+check_vhost_access(User = #auth_user{username = Username,
+                                     impl     = #impl{user_dn = UserDN}},
+                   VHost, _Sock) ->
     Args = [{username, Username},
             {user_dn,  UserDN},
             {vhost,    VHost}],
@@ -93,8 +95,8 @@ check_vhost_access(User = #user{username = Username,
        [log_vhost(Args), log_user(User), log_result(R)]),
     R.
 
-check_resource_access(User = #user{username = Username,
-                                   impl     = #impl{user_dn = UserDN}},
+check_resource_access(User = #auth_user{username = Username,
+                                        impl     = #impl{user_dn = UserDN}},
                       #resource{virtual_host = VHost, kind = Type, name = Name},
                       Permission) ->
     Args = [{username,   Username},
@@ -142,7 +144,7 @@ evaluate0({in_group, DNPattern}, Args, User, LDAP) ->
     evaluate({in_group, DNPattern, "member"}, Args, User, LDAP);
 
 evaluate0({in_group, DNPattern, Desc}, Args,
-          #user{impl = #impl{user_dn = UserDN}}, LDAP) ->
+          #auth_user{impl = #impl{user_dn = UserDN}}, LDAP) ->
     Filter = eldap:equalityMatch(Desc, UserDN),
     DN = fill(DNPattern, Args),
     R = object_exists(DN, Filter, LDAP),
@@ -346,10 +348,9 @@ do_login(Username, PrebindUserDN, Password, LDAP) ->
                  unknown -> username_to_dn(Username, LDAP, dn_lookup_when());
                  _       -> PrebindUserDN
              end,
-    User = #user{username     = Username,
-                 auth_backend = ?MODULE,
-                 impl         = #impl{user_dn  = UserDN,
-                                      password = Password}},
+    User = #auth_user{username     = Username,
+                      impl         = #impl{user_dn  = UserDN,
+                                           password = Password}},
     TagRes = [begin
                   ?L1("CHECK: does ~s have tag ~s?", [Username, Tag]),
                   R = evaluate(Q, [{username, Username},
@@ -359,7 +360,7 @@ do_login(Username, PrebindUserDN, Password, LDAP) ->
                   {Tag, R}
               end || {Tag, Q} <- env(tag_queries)],
     case [E || {_, E = {error, _}} <- TagRes] of
-        []      -> {ok, User#user{tags = [Tag || {Tag, true} <- TagRes]}};
+        []      -> {ok, User#auth_user{tags = [Tag || {Tag, true} <- TagRes]}};
         [E | _] -> E
     end.
 
@@ -408,7 +409,7 @@ dn_lookup2(Username, LDAP) ->
             rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
                                [Filled, Entries]),
             Filled;
-        {error, _}  ->
+        {error, _} ->
             dn_lookup3(Username, LDAP)
     end.
 
@@ -430,21 +431,21 @@ dn_lookup3(Username, LDAP) ->
             exit(E)
     end.
 
-fill_user_dn_pattern1(Username) ->    
-	fill(env(user_dn_pattern1), [{username, Username}]).
+fill_user_dn_pattern1(Username) ->
+    fill(env(user_dn_pattern1), [{username, Username}]).
 
 fill_user_dn_pattern2(Username) ->
-	 fill(env(user_dn_pattern2), [{username, Username}]).
+    fill(env(user_dn_pattern2), [{username, Username}]).
 
 fill_user_dn_pattern3(Username) ->
-         fill(env(user_dn_pattern3), [{username, Username}]).
+    fill(env(user_dn_pattern3), [{username, Username}]).
 
 creds(User) -> creds(User, env(other_bind)).
 
 creds(none, as_user) ->
     {error, "'other_bind' set to 'as_user' but no password supplied"};
-creds(#user{impl = #impl{user_dn = UserDN, password = Password}}, as_user) ->
-    {ok, {UserDN, Password}};
+creds(#auth_user{impl = #impl{user_dn = UserDN, password = PW}}, as_user) ->
+    {ok, {UserDN, PW}};
 creds(_, Creds) ->
     {ok, Creds}.
 
@@ -459,13 +460,13 @@ fill(Fmt, Args) ->
     ?L2("template result: \"~s\"", [R]),
     R.
 
-log_result({ok, #user{}})   -> ok;
-log_result(true)            -> ok;
-log_result(false)           -> denied;
-log_result({refused, _, _}) -> denied;
-log_result(E)               -> E.
+log_result({ok, #auth_user{}}) -> ok;
+log_result(true)               -> ok;
+log_result(false)              -> denied;
+log_result({refused, _, _})    -> denied;
+log_result(E)                  -> E.
 
-log_user(#user{username = U}) -> rabbit_misc:format("\"~s\"", [U]).
+log_user(#auth_user{username = U}) -> rabbit_misc:format("\"~s\"", [U]).
 
 log_vhost(Args) ->
     rabbit_misc:format("access to vhost \"~s\"", [pget(vhost, Args)]).
