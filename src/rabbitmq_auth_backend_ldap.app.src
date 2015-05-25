@@ -1,10 +1,10 @@
 %% -*- erlang -*-
-{application, rabbitmq_auth_backend_ldap_quantedge,
- [{description, "RabbitMQ LDAP Authentication Backend, support up to 3 trees, customized for Quant Edge"},
+{application, rabbitmq_auth_backend_ldap,
+ [{description, "RabbitMQ LDAP Authentication Backend"},
   {vsn, "%%VSN%%"},
   {modules, []},
   {registered, []},
-  {mod, {rabbit_auth_backend_ldap_quantedge_app, []}},
+  {mod, {rabbit_auth_backend_ldap_app, []}},
   {env, [ {servers,               undefined},
           {user_dn_pattern1,      "${username}"},
           {user_dn_pattern2,      "${username}"},
@@ -21,5 +21,6 @@
           {ssl_options,           []},
           {port,                  389},
           {timeout,               infinity},
-          {log,                   false} ] },
+          {log,                   false},
+          {pool_size,             10} ] },
   {applications, [kernel, stdlib, eldap, rabbit]}]}.

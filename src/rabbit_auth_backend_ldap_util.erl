@@ -11,10 +11,10 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_quantedge_util).
+-module(rabbit_auth_backend_ldap_util).
 
 -export([fill/2]).
 
@@ -25,7 +25,10 @@ fill(Fmt, [{K, V} | T]) ->
     Var = [[$\\, $$, ${] ++ atom_to_list(K) ++ [$}]],
     fill(re:replace(Fmt, Var, [to_repl(V)], [global]), T).
 
-to_repl(V) when is_atom(V) ->
-    atom_to_list(V);
-to_repl(V) ->
-    V.
+to_repl(V) when is_atom(V)   -> to_repl(atom_to_list(V));
+to_repl(V) when is_binary(V) -> to_repl(binary_to_list(V));
+to_repl([])                  -> [];
+to_repl([$\\ | T])           -> [$\\, $\\ | to_repl(T)];
+to_repl([$&  | T])           -> [$\\, $&  | to_repl(T)];
+to_repl([H   | T])           -> [H        | to_repl(T)].
+

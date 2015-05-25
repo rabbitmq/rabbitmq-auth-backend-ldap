@@ -11,28 +11,37 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_quantedge_app).
+-module(rabbit_auth_backend_ldap_app).
 
 -behaviour(application).
 -export([start/2, stop/1]).
 
 %% Dummy supervisor to get this application behaviour working
 -behaviour(supervisor).
--export([init/1]).
+-export([create_ldap_pool/0, init/1]).
+
+-rabbit_boot_step({ldap_pool,
+                   [{description, "LDAP pool"},
+                    {mfa, {?MODULE, create_ldap_pool, []}}, 
+                    {requires, kernel_ready}]}).
+
+create_ldap_pool() ->
+    {ok, PoolSize} = application:get_env(rabbitmq_auth_backend_ldap, pool_size),
+    rabbit_sup:start_supervisor_child(ldap_pool_sup, worker_pool_sup, [PoolSize, ldap_pool]).
 
 start(_Type, _StartArgs) ->
     {ok, Backends} = application:get_env(rabbit, auth_backends),
-    case configured(rabbit_auth_backend_ldap_quantedge, Backends) of
+    case configured(rabbit_auth_backend_ldap, Backends) of
         true  -> ok;
         false -> rabbit_log:warning(
-                   "LDAP Quant Edge plugin loaded, but rabbit_auth_backend_ldap_quantedge is not "
+                   "LDAP plugin loaded, but rabbit_auth_backend_ldap is not "
                    "in the list of auth_backends. LDAP auth will not work.~n")
     end,
-    {ok, SSL} = application:get_env(rabbitmq_auth_backend_ldap_quantedge, use_ssl),
-    {ok, TLS} = application:get_env(rabbitmq_auth_backend_ldap_quantedge, use_starttls),
+    {ok, SSL} = application:get_env(rabbitmq_auth_backend_ldap, use_ssl),
+    {ok, TLS} = application:get_env(rabbitmq_auth_backend_ldap, use_starttls),
     case SSL orelse TLS of
         true  -> rabbit_networking:ensure_ssl();
         false -> ok
@@ -51,3 +60,4 @@ configured(M,  [_    |T]) -> configured(M, T).
 %%----------------------------------------------------------------------------
 
 init([]) -> {ok, {{one_for_one, 3, 10}, []}}.
+

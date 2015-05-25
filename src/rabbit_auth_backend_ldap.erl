@@ -11,10 +11,10 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_quantedge).
+-module(rabbit_auth_backend_ldap).
 
 %% Connect to an LDAP server for authentication and authorisation
 
@@ -255,8 +255,10 @@ with_ldap(_Creds, _Fun, undefined) ->
 
 with_ldap({error, _} = E, _Fun, _State) ->
     E;
-%% TODO - ATM we create and destroy a new LDAP connection on every
-%% call. This could almost certainly be more efficient.
+
+%% TODO - while we now pool LDAP connections we don't make any attempt
+%% to avoid rebinding if the connection is already bound as the user
+%% of interest, so this could still be more efficient.
 with_ldap({ok, Creds}, Fun, Servers) ->
     Opts0 = [{port, env(port)}],
     Opts1 = case env(log) of
@@ -275,9 +277,23 @@ with_ldap({ok, Creds}, Fun, Servers) ->
                infinity -> Opts1;
                MS       -> [{timeout, MS} | Opts1]
            end,
-    case eldap_open(Servers, Opts) of
+    worker_pool:submit(
+      ldap_pool,
+      fun () ->
+              case with_login(Creds, Servers, Opts, Fun) of
+                  {error, {gen_tcp_error, closed}} ->
+                      %% retry with new connection
+                      ?L1("server closed connection", []),
+                      purge_conn(Creds == anon, Servers, Opts),
+                      with_login(Creds, Servers, Opts, Fun);
+                  Result -> Result
+              end
+      end, reuse).
+
+with_login(Creds, Servers, Opts, Fun) ->
+    case get_or_create_conn(Creds == anon, Servers, Opts) of
         {ok, LDAP} ->
-            try Creds of
+            case Creds of
                 anon ->
                     ?L1("anonymous bind", []),
                     Fun(LDAP);
@@ -294,13 +310,35 @@ with_ldap({ok, Creds}, Fun, Servers) ->
                             ?L1("bind error: ~s ~p", [UserDN, E]),
                             {error, E}
                     end
-            after
-                eldap:close(LDAP)
             end;
         Error ->
             ?L1("connect error: ~p", [Error]),
             Error
     end.
+
+%% Gets either the anonymous or bound (authenticated) connection
+get_or_create_conn(IsAnon, Servers, Opts) ->
+    Conns = case get(ldap_conns) of
+                undefined -> dict:new();
+                Dict      -> Dict
+            end,
+    Key = {IsAnon, Servers, Opts},
+    case dict:find(Key, Conns) of
+        {ok, Conn} -> Conn;
+        error      -> 
+            case eldap_open(Servers, Opts) of
+                {ok, _} = Conn -> put(ldap_conns, dict:store(Key, Conn, Conns)), Conn;
+                Error -> Error
+            end
+    end.
+
+purge_conn(IsAnon, Servers, Opts) ->
+    Conns = get(ldap_conns),
+    Key = {IsAnon, Servers, Opts},
+    {_, {_, Conn}} = dict:find(Key, Conns),
+    ?L1("Purging dead server connection", []),
+    eldap:close(Conn), %% May already be closed
+    put(ldap_conns, dict:erase(Key, Conns)).
 
 eldap_open(Servers, Opts) ->
     case eldap:open(Servers, ssl_conf() ++ Opts) of
@@ -351,18 +389,29 @@ do_login(Username, PrebindUserDN, Password, LDAP) ->
     User = #auth_user{username     = Username,
                       impl         = #impl{user_dn  = UserDN,
                                            password = Password}},
-    TagRes = [begin
-                  ?L1("CHECK: does ~s have tag ~s?", [Username, Tag]),
-                  R = evaluate(Q, [{username, Username},
-                                   {user_dn,  UserDN}], User, LDAP),
-                  ?L1("DECISION: does ~s have tag ~s? ~p",
-                      [Username, Tag, R]),
-                  {Tag, R}
-              end || {Tag, Q} <- env(tag_queries)],
-    case [E || {_, E = {error, _}} <- TagRes] of
-        []      -> {ok, User#auth_user{tags = [Tag || {Tag, true} <- TagRes]}};
-        [E | _] -> E
+    DTQ = fun (LDAPn) -> do_tag_queries(Username, UserDN, User, LDAPn) end,
+    TagRes = case env(other_bind) of
+                 as_user -> DTQ(LDAP);
+                 _       -> with_ldap(creds(User), DTQ)
+             end,
+    case TagRes of
+        {ok, L} -> case [E || {_, E = {error, _}} <- L] of
+                       []      -> Tags = [Tag || {Tag, true} <- L],
+                                  {ok, User#auth_user{tags = Tags}};
+                       [E | _] -> E
+                   end;
+        E       -> E
     end.
+
+do_tag_queries(Username, UserDN, User, LDAP) ->
+    {ok, [begin
+              ?L1("CHECK: does ~s have tag ~s?", [Username, Tag]),
+              R = evaluate(Q, [{username, Username},
+                               {user_dn,  UserDN}], User, LDAP),
+              ?L1("DECISION: does ~s have tag ~s? ~p",
+                  [Username, Tag, R]),
+              {Tag, R}
+          end || {Tag, Q} <- env(tag_queries)]}.
 
 dn_lookup_when() -> case {env(dn_lookup_attribute), env(dn_lookup_bind)} of
                         {none, _}       -> never;
@@ -456,7 +505,7 @@ log(Fmt,  Args) -> case env(log) of
 
 fill(Fmt, Args) ->
     ?L2("filling template \"~s\" with~n            ~p", [Fmt, Args]),
-    R = rabbit_auth_backend_ldap_quantedge_util:fill(Fmt, Args),
+    R = rabbit_auth_backend_ldap_util:fill(Fmt, Args),
     ?L2("template result: \"~s\"", [R]),
     R.
 
