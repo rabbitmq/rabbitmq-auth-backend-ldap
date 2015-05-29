@@ -1,10 +1,10 @@
 %% -*- erlang -*-
-{application, rabbitmq_auth_backend_ldap,
- [{description, "RabbitMQ LDAP Authentication Backend"},
+{application, rabbitmq_auth_backend_ldap_quantedge,
+ [{description, "RabbitMQ LDAP Authentication Backend - QUANT EDGE"},
   {vsn, "%%VSN%%"},
   {modules, []},
   {registered, []},
-  {mod, {rabbit_auth_backend_ldap_app, []}},
+  {mod, {rabbit_auth_backend_ldap_quantedge_app, []}},
   {env, [ {servers,               undefined},
           {user_dn_pattern1,      "${username}"},
           {user_dn_pattern2,      "${username}"},

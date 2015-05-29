@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_app).
+-module(rabbit_auth_backend_ldap_quantedge_app).
 
 -behaviour(application).
 -export([start/2, stop/1]).
@@ -29,19 +29,19 @@
                     {requires, kernel_ready}]}).
 
 create_ldap_pool() ->
-    {ok, PoolSize} = application:get_env(rabbitmq_auth_backend_ldap, pool_size),
+    {ok, PoolSize} = application:get_env(rabbitmq_auth_backend_ldap_quantedge, pool_size),
     rabbit_sup:start_supervisor_child(ldap_pool_sup, worker_pool_sup, [PoolSize, ldap_pool]).
 
 start(_Type, _StartArgs) ->
     {ok, Backends} = application:get_env(rabbit, auth_backends),
-    case configured(rabbit_auth_backend_ldap, Backends) of
+    case configured(rabbit_auth_backend_ldap_quantedge, Backends) of
         true  -> ok;
         false -> rabbit_log:warning(
-                   "LDAP plugin loaded, but rabbit_auth_backend_ldap is not "
-                   "in the list of auth_backends. LDAP auth will not work.~n")
+                   "LDAP QUANTEDGE plugin loaded, but rabbit_auth_backend_ldap_quantedge is not "
+                   "in the list of auth_backends. LDAP QUANTEDGE auth will not work.~n")
     end,
-    {ok, SSL} = application:get_env(rabbitmq_auth_backend_ldap, use_ssl),
-    {ok, TLS} = application:get_env(rabbitmq_auth_backend_ldap, use_starttls),
+    {ok, SSL} = application:get_env(rabbitmq_auth_backend_ldap_quantedge, use_ssl),
+    {ok, TLS} = application:get_env(rabbitmq_auth_backend_ldap_quantedge, use_starttls),
     case SSL orelse TLS of
         true  -> rabbit_networking:ensure_ssl();
         false -> ok

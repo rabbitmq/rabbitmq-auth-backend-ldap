@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_ldap_util).
+-module(rabbit_auth_backend_ldap_quantedge_util).
 
 -export([fill/2]).
 
