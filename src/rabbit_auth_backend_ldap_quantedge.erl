@@ -27,9 +27,9 @@
 -export([user_login_authentication/2, user_login_authorization/1,
          check_vhost_access/3, check_resource_access/3]).
 
--define(L_1(F, A),  log("LDAP_1 "         ++ F, A)).
--define(L_2(F, A), log("LDAP_2 "     ++ F, A)).
--define(L_3(F, A), log("LDAP_3 " ++ F, A)).
+-define(L(F, A),  log("LDAP "         ++ F, A)).
+-define(L1(F, A), log("    LDAP "     ++ F, A)).
+-define(L2(F, A), log("        LDAP " ++ F, A)).
 
 -import(rabbit_misc, [pget/2]).
 
@@ -39,22 +39,22 @@
 
 user_login_authentication(Username, []) ->
     %% Without password, e.g. EXTERNAL
-    ?L_1("CHECK: passwordless login for ~s", [Username]),
+    ?L("CHECK: passwordless login for ~s", [Username]),
     R = with_ldap(creds(none),
                   fun(LDAP) -> do_login(Username, unknown, none, LDAP) end),
-    ?L_1("DECISION: passwordless login for ~s: ~p",
+    ?L("DECISION: passwordless login for ~s: ~p",
        [Username, log_result(R)]),
     R;
 
 user_login_authentication(Username, [{password, <<>>}]) ->
     %% Password "" is special in LDAP, see
     %% https://tools.ietf.org/html/rfc4513#section-5.1.2
-    ?L_1("CHECK: unauthenticated login for ~s", [Username]),
-    ?L_1("DECISION: unauthenticated login for ~s: denied", [Username]),
+    ?L("CHECK: unauthenticated login for ~s", [Username]),
+    ?L("DECISION: unauthenticated login for ~s: denied", [Username]),
     {refused, "user '~s' - unauthenticated bind not allowed", [Username]};
 
 user_login_authentication(User, [{password, PW}]) ->
-    ?L_1("CHECK: login for ~s", [User]),
+    ?L("CHECK: login for ~s", [User]),
     R = case dn_lookup_when() of
             prebind -> UserDN = username_to_dn_prebind(User),
                        with_ldap({ok, {UserDN, PW}},
@@ -89,9 +89,9 @@ check_vhost_access(User = #auth_user{username = Username,
     Args = [{username, Username},
             {user_dn,  UserDN},
             {vhost,    VHost}],
-    ?L_1("CHECK: ~s for ~s", [log_vhost(Args), log_user(User)]),
+    ?L("CHECK: ~s for ~s", [log_vhost(Args), log_user(User)]),
     R = evaluate_ldap(env(vhost_access_query), Args, User),
-    ?L_1("DECISION: ~s for ~s: ~p",
+    ?L("DECISION: ~s for ~s: ~p",
        [log_vhost(Args), log_user(User), log_result(R)]),
     R.
 
@@ -105,26 +105,26 @@ check_resource_access(User = #auth_user{username = Username,
             {resource,   Type},
             {name,       Name},
             {permission, Permission}],
-    ?L_1("CHECK: ~s for ~s", [log_resource(Args), log_user(User)]),
+    ?L("CHECK: ~s for ~s", [log_resource(Args), log_user(User)]),
     R = evaluate_ldap(env(resource_access_query), Args, User),
-    ?L_1("DECISION: ~s for ~s: ~p",
+    ?L("DECISION: ~s for ~s: ~p",
        [log_resource(Args), log_user(User), log_result(R)]),
     R.
 
 %%--------------------------------------------------------------------
 
 evaluate(Query, Args, User, LDAP) ->
-    ?L_2("evaluating query: ~p", [Query]),
+    ?L1("evaluating query: ~p", [Query]),
     evaluate0(Query, Args, User, LDAP).
 
 evaluate0({constant, Bool}, _Args, _User, _LDAP) ->
-    ?L_2("evaluated constant: ~p", [Bool]),
+    ?L1("evaluated constant: ~p", [Bool]),
     Bool;
 
 evaluate0({for, [{Type, Value, SubQuery}|Rest]}, Args, User, LDAP) ->
     case pget(Type, Args) of
         undefined -> {error, {args_do_not_contain, Type, Args}};
-        Value     -> ?L_2("selecting subquery ~s = ~s", [Type, Value]),
+        Value     -> ?L1("selecting subquery ~s = ~s", [Type, Value]),
                      evaluate(SubQuery, Args, User, LDAP);
         _         -> evaluate0({for, Rest}, Args, User, LDAP)
     end;
@@ -137,7 +137,7 @@ evaluate0({exists, DNPattern}, Args, _User, LDAP) ->
     Filter = eldap:present("objectClass"),
     DN = fill(DNPattern, Args),
     R = object_exists(DN, Filter, LDAP),
-    ?L_2("evaluated exists for \"~s\": ~p", [DN, R]),
+    ?L1("evaluated exists for \"~s\": ~p", [DN, R]),
     R;
 
 evaluate0({in_group, DNPattern}, Args, User, LDAP) ->
@@ -148,32 +148,32 @@ evaluate0({in_group, DNPattern, Desc}, Args,
     Filter = eldap:equalityMatch(Desc, UserDN),
     DN = fill(DNPattern, Args),
     R = object_exists(DN, Filter, LDAP),
-    ?L_2("evaluated in_group for \"~s\": ~p", [DN, R]),
+    ?L1("evaluated in_group for \"~s\": ~p", [DN, R]),
     R;
 
 evaluate0({'not', SubQuery}, Args, User, LDAP) ->
     R = evaluate(SubQuery, Args, User, LDAP),
-    ?L_2("negated result to ~s", [R]),
+    ?L1("negated result to ~s", [R]),
     not R;
 
 evaluate0({'and', Queries}, Args, User, LDAP) when is_list(Queries) ->
     R = lists:foldl(fun (Q,  true)  -> evaluate(Q, Args, User, LDAP);
                         (_Q, false) -> false
                     end, true, Queries),
-    ?L_2("'and' result: ~s", [R]),
+    ?L1("'and' result: ~s", [R]),
     R;
 
 evaluate0({'or', Queries}, Args, User, LDAP) when is_list(Queries) ->
     R = lists:foldl(fun (_Q, true)  -> true;
                         (Q,  false) -> evaluate(Q, Args, User, LDAP)
                     end, false, Queries),
-    ?L_2("'or' result: ~s", [R]),
+    ?L1("'or' result: ~s", [R]),
     R;
 
 evaluate0({equals, StringQuery1, StringQuery2}, Args, User, LDAP) ->
     safe_eval(fun (String1, String2) ->
                       R = String1 =:= String2,
-                      ?L_2("evaluated equals \"~s\", \"~s\": ~s",
+                      ?L1("evaluated equals \"~s\", \"~s\": ~s",
                           [String1, String2, R]),
                       R
               end,
@@ -186,7 +186,7 @@ evaluate0({match, StringQuery, REQuery}, Args, User, LDAP) ->
                               {match, _} -> true;
                               nomatch    -> false
                           end,
-                      ?L_2("evaluated match \"~s\" against RE \"~s\": ~s",
+                      ?L1("evaluated match \"~s\" against RE \"~s\": ~s",
                           [String, RE, R]),
                       R
               end,
@@ -205,7 +205,7 @@ evaluate0({string, StringPattern}, Args, _User, _LDAP) ->
 evaluate0({attribute, DNPattern, AttributeName}, Args, _User, LDAP) ->
     DN = fill(DNPattern, Args),
     R = attribute(DN, AttributeName, LDAP),
-    ?L_2("evaluated attribute \"~s\" for \"~s\": ~p",
+    ?L1("evaluated attribute \"~s\" for \"~s\": ~p",
         [AttributeName, DN, R]),
     R;
 
@@ -284,7 +284,7 @@ with_ldap({ok, Creds}, Fun, Servers) ->
               case with_login(Creds, Servers, Opts, Fun) of
                   {error, {gen_tcp_error, closed}} ->
                       %% retry with new connection
-                      ?L_2("server closed connection", []),
+                      ?L1("server closed connection", []),
                       purge_conn(Creds == anon, Servers, Opts),
                       with_login(Creds, Servers, Opts, Fun);
                   Result -> Result
@@ -296,24 +296,24 @@ with_login(Creds, Servers, Opts, Fun) ->
         {ok, LDAP} ->
             case Creds of
                 anon ->
-                    ?L_2("anonymous bind", []),
+                    ?L1("anonymous bind", []),
                     Fun(LDAP);
                 {UserDN, Password} ->
                     case eldap:simple_bind(LDAP, UserDN, Password) of
                         ok ->
-                            ?L_2("bind succeeded: ~s", [UserDN]),
+                            ?L1("bind succeeded: ~s", [UserDN]),
                             Fun(LDAP);
                         {error, invalidCredentials} ->
-                            ?L_2("bind returned \"invalid credentials\": ~s",
+                            ?L1("bind returned \"invalid credentials\": ~s",
                                 [UserDN]),
                             {refused, UserDN, []};
                         {error, E} ->
-                            ?L_2("bind error: ~s ~p", [UserDN, E]),
+                            ?L1("bind error: ~s ~p", [UserDN, E]),
                             {error, E}
                     end
             end;
         Error ->
-            ?L_2("connect error: ~p", [Error]),
+            ?L1("connect error: ~p", [Error]),
             Error
     end.
 
@@ -337,7 +337,7 @@ purge_conn(IsAnon, Servers, Opts) ->
     Conns = get(ldap_conns),
     Key = {IsAnon, Servers, Opts},
     {_, {_, Conn}} = dict:find(Key, Conns),
-    ?L_2("Purging dead server connection", []),
+    ?L1("Purging dead server connection", []),
     eldap:close(Conn), %% May already be closed
     put(ldap_conns, dict:erase(Key, Conns)).
 
@@ -406,10 +406,10 @@ do_login(Username, PrebindUserDN, Password, LDAP) ->
 
 do_tag_queries(Username, UserDN, User, LDAP) ->
     {ok, [begin
-              ?L_2("CHECK: does ~s have tag ~s?", [Username, Tag]),
+              ?L1("CHECK: does ~s have tag ~s?", [Username, Tag]),
               R = evaluate(Q, [{username, Username},
                                {user_dn,  UserDN}], User, LDAP),
-              ?L_2("DECISION: does ~s have tag ~s? ~p",
+              ?L1("DECISION: does ~s have tag ~s? ~p",
                   [Username, Tag, R]),
               {Tag, R}
           end || {Tag, Q} <- env(tag_queries)]}.
@@ -435,7 +435,7 @@ dn_lookup(Username, LDAP) ->
                                   env(dn_lookup_attribute), Filled)},
                        {attributes, ["distinguishedName"]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{object_name = DN}]}}->
-            ?L_2("DN lookup: ~s -> ~s", [Username, DN]),
+            ?L1("DN lookup: ~s -> ~s", [Username, DN]),
             DN;
         {ok, #eldap_search_result{entries = Entries}} ->
             rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
@@ -453,7 +453,7 @@ dn_lookup2(Username, LDAP) ->
                                   env(dn_lookup_attribute), Filled)},
                        {attributes, ["distinguishedName"]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{object_name = DN}]}}->
-            ?L_2("DN lookup: ~s -> ~s", [Username, DN]),
+            ?L1("DN lookup: ~s -> ~s", [Username, DN]),
             DN;
         {ok, #eldap_search_result{entries = Entries}} ->
             rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
@@ -471,7 +471,7 @@ dn_lookup3(Username, LDAP) ->
                                   env(dn_lookup_attribute), Filled)},
                        {attributes, ["distinguishedName"]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{object_name = DN}]}}->
-            ?L_2("DN lookup: ~s -> ~s", [Username, DN]),
+            ?L1("DN lookup: ~s -> ~s", [Username, DN]),
             DN;
         {ok, #eldap_search_result{entries = Entries}} ->
             rabbit_log:warning("Searching for DN for ~s, got back ~p~n",
@@ -505,9 +505,9 @@ log(Fmt,  Args) -> case env(log) of
                    end.
 
 fill(Fmt, Args) ->
-    ?L_3("filling template \"~s\" with~n            ~p", [Fmt, Args]),
+    ?L2("filling template \"~s\" with~n            ~p", [Fmt, Args]),
     R = rabbit_auth_backend_ldap_quantedge_util:fill(Fmt, Args),
-    ?L_3("template result: \"~s\"", [R]),
+    ?L2("template result: \"~s\"", [R]),
     R.
 
 log_result({ok, #auth_user{}}) -> ok;
