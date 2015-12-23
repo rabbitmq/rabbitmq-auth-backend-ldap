@@ -224,8 +224,11 @@ attribute(DN, AttributeName, LDAP) ->
                        {filter, eldap:present("objectClass")},
                        {attributes, [AttributeName]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{attributes = A}]}} ->
-            case pget(AttributeName, A) of
-                [Attr] -> Attr;
+            AttributeValues = pget(AttributeName, A),
+            ?L1("pget results ~p", [AttributeValues]),
+            case AttributeValues of
+                [] -> {error, not_found};
+                [Head|_] -> Head;
                 _      -> {error, not_found}
             end;
         {ok, #eldap_search_result{entries = _}} ->
@@ -316,7 +319,7 @@ get_or_create_conn(IsAnon, Servers, Opts) ->
     Key = {IsAnon, Servers, Opts},
     case dict:find(Key, Conns) of
         {ok, Conn} -> Conn;
-        error      -> 
+        error      ->
             case eldap_open(Servers, Opts) of
                 {ok, _} = Conn -> put(ldap_conns, dict:store(Key, Conn, Conns)), Conn;
                 Error -> Error
