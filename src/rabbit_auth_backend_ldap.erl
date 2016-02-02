@@ -162,7 +162,13 @@ evaluate0({'or', Queries}, Args, User, LDAP) when is_list(Queries) ->
     R;
 
 evaluate0({equals, StringQuery1, StringQuery2}, Args, User, LDAP) ->
-    safe_eval(fun (String1, String2) ->
+    safe_eval(fun
+                  (List, String2) when is_list(List)->
+                    F = fun (Element) ->
+                      Element =:= String2
+                    end,
+                    lists:any(F, List);
+                  (String1, String2) ->
                       R = String1 =:= String2,
                       ?L1("evaluated equals \"~s\", \"~s\": ~s",
                           [String1, String2, R]),
@@ -225,10 +231,10 @@ attribute(DN, AttributeName, LDAP) ->
                        {attributes, [AttributeName]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{attributes = A}]}} ->
             AttributeValues = pget(AttributeName, A),
-            ?L1("pget results ~p", [AttributeValues]),
+            %%% MM ?L1("pget results ~p", [AttributeValues]),
             case AttributeValues of
                 [] -> {error, not_found};
-                [Head|_] -> Head;
+                [Head|List] -> lists:append([[Head], List]);
                 _      -> {error, not_found}
             end;
         {ok, #eldap_search_result{entries = _}} ->
