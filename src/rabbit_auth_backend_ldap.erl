@@ -162,7 +162,13 @@ evaluate0({'or', Queries}, Args, User, LDAP) when is_list(Queries) ->
     R;
 
 evaluate0({equals, StringQuery1, StringQuery2}, Args, User, LDAP) ->
-    safe_eval(fun (String1, String2) ->
+    safe_eval(fun
+                  (List, String2) when is_list(List)->
+                    F = fun (Element) ->
+                      Element =:= String2
+                    end,
+                    lists:any(F, List);
+                  (String1, String2) ->
                       R = String1 =:= String2,
                       ?L1("evaluated equals \"~s\", \"~s\": ~s",
                           [String1, String2, R]),
@@ -224,8 +230,11 @@ attribute(DN, AttributeName, LDAP) ->
                        {filter, eldap:present("objectClass")},
                        {attributes, [AttributeName]}]) of
         {ok, #eldap_search_result{entries = [#eldap_entry{attributes = A}]}} ->
-            case pget(AttributeName, A) of
-                [Attr] -> Attr;
+            AttributeValues = pget(AttributeName, A),
+            %%% MM ?L1("pget results ~p", [AttributeValues]),
+            case AttributeValues of
+                [] -> {error, not_found};
+                [Head|List] -> lists:append([[Head], List]);
                 _      -> {error, not_found}
             end;
         {ok, #eldap_search_result{entries = _}} ->
@@ -316,7 +325,7 @@ get_or_create_conn(IsAnon, Servers, Opts) ->
     Key = {IsAnon, Servers, Opts},
     case dict:find(Key, Conns) of
         {ok, Conn} -> Conn;
-        error      -> 
+        error      ->
             case eldap_open(Servers, Opts) of
                 {ok, _} = Conn -> put(ldap_conns, dict:store(Key, Conn, Conns)), Conn;
                 Error -> Error
