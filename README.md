@@ -1,5 +1,12 @@
 # RabbitMQ LDAP Authentication Backend
 
+## This was migrated to https://github.com/rabbitmq/rabbitmq-server
+
+This repository has been moved to the main unified RabbitMQ "monorepo", including all open issues. You can find the source under [/deps/rabbitmq_auth_backend_ldap](https://github.com/rabbitmq/rabbitmq-server/tree/master/deps/rabbitmq_auth_backend_ldap).
+All issues have been transferred.
+
+## Overview
+
 This plugin provides [authentication and authorisation backends](https://rabbitmq.com/access-control.html)
 for RabbitMQ that use LDAP.
 
